@@ -1,0 +1,172 @@
+warning: in the working copy of 'reflection.md', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/domain_assistant.py b/domain_assistant.py[m
+[1mindex 60b76b6..f519965 100644[m
+[1m--- a/domain_assistant.py[m
+[1m+++ b/domain_assistant.py[m
+[36m@@ -246,24 +246,51 @@[m [mclass OpenAIGenerator:[m
+     def __init__(self, max_output_tokens: int = 300) -> None:[m
+         api_key = os.getenv("OPENAI_API_KEY", "").strip()[m
+         self.model = os.getenv("OPENAI_MODEL", "").strip()[m
+[32m+[m[32m        base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None[m
+         if not api_key:[m
+             raise RuntimeError("OPENAI_API_KEY is missing from .env")[m
+         if not self.model:[m
+             raise RuntimeError("OPENAI_MODEL is missing from .env")[m
+[31m-        self.client = OpenAI(api_key=api_key)[m
+[32m+[m[32m        self.client = OpenAI(api_key=api_key, base_url=base_url)[m
+         self.max_output_tokens = max_output_tokens[m
+ [m
+     def generate(self, prompt: str) -> str:[m
+[31m-        response = self.client.responses.create([m
+[31m-            model=self.model,[m
+[31m-            input=prompt,[m
+[31m-            temperature=0,[m
+[31m-            max_output_tokens=self.max_output_tokens,[m
+[31m-        )[m
+[31m-        answer = response.output_text.strip()[m
+[31m-        if not answer:[m
+[31m-            raise RuntimeError("OpenAI returned an empty answer")[m
+[31m-        return answer[m
+[32m+[m[32m        last_err: Exception | None = None[m
+[32m+[m[32m        candidate_models = [self.model][m
+[32m+[m[32m        if "gemini-3.1-flash-lite" not in candidate_models:[m
+[32m+[m[32m            candidate_models.append("gemini-3.1-flash-lite")[m
+[32m+[m
+[32m+[m[32m        for attempt in range(6):[m
+[32m+[m[32m            for model_name in candidate_models:[m
+[32m+[m[32m                try:[m
+[32m+[m[32m                    try:[m
+[32m+[m[32m                        response = self.client.responses.create([m
+[32m+[m[32m                            model=model_name,[m
+[32m+[m[32m                            input=prompt,[m
+[32m+[m[32m                            temperature=0,[m
+[32m+[m[32m                            max_output_tokens=self.max_output_tokens,[m
+[32m+[m[32m                        )[m
+[32m+[m[32m                        answer = response.output_text.strip()[m
+[32m+[m[32m                        if answer:[m
+[32m+[m[32m                            return answer[m
+[32m+[m[32m                    except Exception:[m
+[32m+[m[32m                        pass[m
+[32m+[m
+[32m+[m[32m                    # Fallback to chat completions (for Gemini / standard OpenAI-compatible endpoints)[m
+[32m+[m[32m                    response = self.client.chat.completions.create([m
+[32m+[m[32m                        model=model_name,[m
+[32m+[m[32m                        messages=[{"role": "user", "content": prompt}],[m
+[32m+[m[32m                        temperature=0,[m
+[32m+[m[32m                        max_tokens=self.max_output_tokens,[m
+[32m+[m[32m                    )[m
+[32m+[m[32m                    answer = response.choices[0].message.content or ""[m
+[32m+[m[32m                    answer = answer.strip()[m
+[32m+[m[32m                    if answer:[m
+[32m+[m[32m                        return answer[m
+[32m+[m[32m                except Exception as e:[m
+[32m+[m[32m                    last_err = e[m
+[32m+[m[32m            time.sleep(3 * (attempt + 1))[m
+[32m+[m[32m        raise RuntimeError(f"Generator failed after retries: {last_err}")[m
+ [m
+ [m
+ @dataclass(frozen=True)[m
+[36m@@ -451,6 +478,7 @@[m [mdef generate_actual_answers([m
+             f"[{bar_after}] {index:02d}/{total:02d} | {item['id']} OK "[m
+             f"({elapsed:.1f}s, {len(response.retrieved_chunks)} chunks)"[m
+         )[m
+[32m+[m[32m        time.sleep(1.5)[m
+ [m
+     return {[m
+         "schema_version": "1.0",[m
+[1mdiff --git a/exercises.md b/exercises.md[m
+[1mindex 9f607fd..94f36cb 100644[m
+[1m--- a/exercises.md[m
+[1m+++ b/exercises.md[m
+[36m@@ -30,11 +30,11 @@[m [mcritical.[m
+ [m
+ | Metric | Acceptable Low Score Scenario | Critical Low Score Scenario | Action Required |[m
+ |---|---|---|---|[m
+[31m-| Faithfulness | | | |[m
+[31m-| Answer Relevance | | | |[m
+[31m-| Context Recall | | | |[m
+[31m-| Context Precision | | | |[m
+[31m-| Completeness | | | |[m
+[32m+[m[32m| Faithfulness | Khi câu hỏi thuộc loại chitchat xã giao hoặc câu từ chối theo policy an toàn ("Tôi là trợ lý AI...", "Tôi không thể hỗ trợ nội dung này") mà context retriever trả về là tài liệu rác hoặc không chứa câu trả lời; câu trả lời của agent chỉ thuần túy là lời chào/từ chối chuẩn mực không dựa vào context. | Khi câu hỏi hỏi chính sách trọng yếu (giá tiền, thời hạn bảo hành, đổi trả, sửa chữa) nhưng agent tự "bịa" ra thông tin hoặc chính sách không hề có trong tài liệu context retrieved (hallucination nghiêm trọng). | Bổ sung prompt constraint nghiêm ngặt ("chỉ trả lời dựa trên context"), thêm guardrail hallucination checker trước khi gửi answer cho người dùng, hoặc giảm temperature. |[m
+[32m+[m[32m| Answer Relevance | Khi người dùng hỏi một câu hỏi mơ hồ, câu hỏi bẫy hoặc false premise ("Tại sao OrbitTech lại tặng miễn phí laptop cho mọi người?"), hệ thống cần giải thích bối cảnh và làm rõ hiểu lầm thay vì trả lời trực diện câu hỏi sai đó. | Người dùng hỏi rõ một câu cụ thể (ví dụ: "Phí vận chuyển hỏa tốc là bao nhiêu?") nhưng agent trả lời lan man sang chính sách bảo hành hoặc giới thiệu danh mục sản phẩm khác. | Tối ưu hóa system prompt về intent detection, tinh chỉnh few-shot examples hướng dẫn tập trung giải quyết đúng trọng tâm câu hỏi. |[m
+[32m+[m[32m| Context Recall | Câu hỏi chỉ cần một sự thật đơn lẻ (single-hop lookup, ví dụ: "Thời hạn đổi trả tiêu chuẩn là bao nhiêu ngày?"), chỉ cần 1 chunk duy nhất đã đủ trả lời, các chunks khác không cần thiết phải phủ hết toàn bộ các khía cạnh mở rộng của expected answer. | Câu hỏi so sánh hoặc điều kiện nhiều bước (multi-hop / exceptions), ví dụ: đổi trả hàng khuyến mãi kết hợp thành viên VIP, nhưng retriever bỏ sót hoàn toàn tài liệu về thành viên VIP hoặc chính sách khuyến mãi. | Tăng `top_k` retrieval, thử nghiệm kỹ thuật chunking nhỏ hơn kèm overlap, hoặc sử dụng query expansion / hybrid search (kết hợp keyword BM25 và semantic vector search). |[m
+[32m+[m[32m| Context Precision | Tập context trả về toàn bộ đều có liên quan cao nhưng thứ tự chunk quan trọng nhất bị xếp thứ 2 hoặc thứ 3 thay vì thứ 1, trong khi generator vẫn đọc đủ toàn bộ top-k và trả lời đúng. | Chunk chứa thông tin cốt lõi duy nhất bị chìm ở cuối danh sách (vị trí k=5 hay k=10) sau một loạt chunks rác (noise chunks), khiến generator bị "lost in the middle" hoặc sinh hallucination do nhiễu. | Bổ sung bước Reranking (như cross-encoder hoặc lexical reranking) để đẩy chunk liên quan lên đầu; lọc ngưỡng similarity threshold trước khi đưa vào prompt context. |[m
+[32m+[m[32m| Completeness | Khi câu trả lời tóm tắt ngắn gọn súc tích các ý chính mà không nhắc lại các chi tiết râu ria hoặc ví dụ minh họa có trong expected answer, nhưng vẫn đáp ứng đủ nhu cầu thông tin của người dùng. | Câu hỏi hỏi quy trình 4 bước hoàn tiền hoặc các trường hợp từ chối bảo hành, nhưng agent chỉ nêu được 1 bước rồi dừng lại, bỏ sót hoàn toàn các điều kiện tiên quyết và ngoại lệ cốt lõi. | Tinh chỉnh prompt yêu cầu liệt kê đầy đủ các điều kiện/tiêu chí; tăng `max_tokens` của generation; kiểm tra xem retrieval có cung cấp đủ thông tin cho toàn bộ câu trả lời hay không. |[m
+ [m
+ ### Exercise 1.2 — Bias trong LLM-as-a-Judge[m
+ [m
+[36m@@ -47,14 +47,26 @@[m [mBa bias thường gặp:[m
+ **Câu 1: Thiết kế experiment phát hiện position bias với ít nhất hai conditions.**[m
+ [m
+ > *Câu trả lời:*[m
+[32m+[m[32m> Tôi thiết kế một thực nghiệm kiểm tra thiên kiến vị trí (Position Bias) trên tập 20 cặp câu trả lời $(A, B)$ độc lập cho cùng câu hỏi và rubric:[m
+[32m+[m[32m> - **Condition 1 (Thứ tự ban đầu):** Đưa vào Prompt của Judge LLM theo khuôn mẫu `Response 1: A`, `Response 2: B`. Ghi nhận điểm số $S(A_1)$ và $S(B_2)$, hoặc tỷ lệ Judge chọn Response 1 thắng.[m
+[32m+[m[32m> - **Condition 2 (Đảo ngược thứ tự):** Hoán đổi vị trí trong Prompt: `Response 1: B`, `Response 2: A`. Giữ nguyên system prompt, rubric, temperature=0 và seed. Ghi nhận điểm số $S(B_1)$ và $S(A_2)$.[m
+[32m+[m[32m> - **Chỉ số đo lường:** Tính tỷ lệ câu trả lời ở vị trí đầu tiên (Response 1) được chấm điểm cao hơn ở cả 2 điều kiện. Nếu tỷ lệ thắng của Response 1 vượt quá $60\%$ (vượt xa mức ngẫu nhiên $50\%$), điều đó chứng minh mô hình judge có Position Bias rõ rệt. Giải pháp là luôn chạy cả 2 lượt hoán đổi (position swap) rồi lấy trung bình điểm.[m
+ [m
+ **Câu 2: Làm thế nào giảm verbosity bias bằng rubric design?**[m
+ [m
+ > *Câu trả lời:*[m
+[32m+[m[32m> Tôi giảm verbosity bias bằng cách thiết kế rubric dựa trên "đơn vị thông tin cốt lõi" (Key Information Units / Fact Checklist) thay vì đánh giá văn phong chung chung:[m
+[32m+[m[32m> - Định nghĩa rõ ràng: Điểm tối đa (5/5) được trao cho câu trả lời cung cấp chính xác và đầy đủ các sự kiện cần thiết theo cách ngắn gọn, trực diện nhất.[m
+[32m+[m[32m> - Đưa quy tắc phạt vào rubric: "Các câu trả lời cố tình kéo dài dòng, lặp từ, hoặc chèn thêm thông tin râu ria không được hỏi sẽ bị trừ từ 1 đến 2 điểm (tối đa chỉ được 3/5 dù các thông tin râu ria đó đúng sự thật)".[m
+[32m+[m[32m> - Chia thang điểm thành checklist nhị phân (có/không từng ý chính), Judge chỉ cộng điểm khi phát hiện facts cốt lõi, loại bỏ hoàn toàn ảnh hưởng của độ dài văn bản.[m
+ [m
+ **Câu 3: Tại sao cần calibrate LLM judge với human labels?**[m
+ [m
+ > *Câu trả lời:*[m
+[32m+[m[32m> Tôi cần calibrate LLM judge với nhãn của con người (human labels) vì những lý do cốt lõi sau:[m
+[32m+[m[32m> - LLM Judge là một mô hình xác suất, có các thiên kiến nội tại (vị trí, độ dài, tự ưu tiên) và có thể hiểu sai sắc thái hoặc chính sách nghiệp vụ thực tế của doanh nghiệp.[m
+[32m+[m[32m> - Việc hiệu chuẩn (calibration) thông qua đo lường hệ số tương quan (như Spearman, Pearson hoặc Cohen's Kappa) giữa điểm LLM chấm và điểm chuyên gia con người chấm giúp xác thực xem Judge tự động có thực sự đại diện cho tiêu chuẩn chất lượng của con người hay không.[m
+[32m+[m[32m> - Calibration giúp xác định sai số lệch chuẩn (systematic offset, ví dụ judge luôn chấm quá khắt khe hoặc quá nới tay), từ đó giúp tinh chỉnh lại rubric, cung cấp few-shot calibration examples chuẩn mực, hoặc điều chỉnh ngưỡng ra quyết định trước khi đưa pipeline đánh giá vào CI/CD tự động.[m
+ [m
+ ### Exercise 1.3 — Evaluation trong CI/CD[m
+ [m
+[36m@@ -62,13 +74,17 @@[m [mBa bias thường gặp:[m
+ [m
+ | Metric | Threshold | Lý do |[m
+ |---|---:|---|[m
+[31m-| Faithfulness | | |[m
+[31m-| Answer Relevance | | |[m
+[31m-| Completeness | | |[m
+[32m+[m[32m| Faithfulness | ≥ 0.70 | Trong hệ thống CSKH công nghệ, hallucination về giá cả, chính sách hoàn tiền hoặc bảo hành sẽ gây hậu quả pháp lý và thiệt hại tài chính trực tiếp cho công ty. Ngưỡng 0.70 đảm bảo câu trả lời phải được neo chặt (grounded) vào tài liệu nội bộ; nếu dưới 0.70 thì tuyệt đối không được deploy. |[m
+[32m+[m[32m| Answer Relevance | ≥ 0.60 | Trả lời sai trọng tâm câu hỏi khiến khách hàng bức xúc và tăng chi phí chuyển tiếp cho nhân viên con người (escalation rate). Ngưỡng 0.60 đảm bảo câu trả lời giải quyết đúng vấn đề khách đang hỏi. |[m
+[32m+[m[32m| Completeness | ≥ 0.50 | Thiếu sót điều kiện hoặc ngoại lệ chính sách có thể khiến khách hàng hiểu lầm quyền lợi, nhưng mức độ rủi ro ít nghiêm trọng hơn so với việc bịa đặt thông tin (Faithfulness). Ngưỡng 0.50 là mức sàn tối thiểu chấp nhận được cho phiên bản MVP để không chặn oan các bản cập nhật. |[m
+ [m
+ **Câu 2: Khi nào dùng offline evaluation, online evaluation và human review?**[m
+ [m
+ > *Câu trả lời:*[m
+[32m+[m[32m> Tôi phân bổ ba hình thức đánh giá này theo từng giai đoạn trong vòng đời phần mềm AI:[m
+[32m+[m[32m> - **Offline Evaluation (Đánh giá ngoại tuyến):** Dùng trong giai đoạn phát triển (Dev) và làm quality gate trong CI/CD pipeline trước khi release. Chạy tự động trên bộ Golden Dataset (20 QA cố định) mỗi khi kỹ sư thay đổi prompt, model, tham số retrieval hay chunking. Mục đích là kiểm tra hồi quy (regression testing) nhanh chóng, chi phí thấp, không ảnh hưởng đến người dùng cuối.[m
+[32m+[m[32m> - **Online Evaluation (Đánh giá trực tuyến):** Dùng liên tục trên môi trường Production khi hệ thống đang phục vụ khách hàng thật. Thu thập tín hiệu thực tế (implicit/explicit feedback: thumbs up/down, dwell time, tỷ lệ khách bấm yêu cầu gặp nhân viên tổng đài - escalation rate) và chạy LLM-as-a-judge trên mẫu ngẫu nhiên (1-5% production traffic) để phát hiện data drift và suy giảm hiệu năng theo thời gian.[m
+[32m+[m[32m> - **Human Review (Đánh giá chuyên gia con người):** Dùng định kỳ (hàng tuần/tháng) hoặc khi xử lý sự cố khẩn cấp. Áp dụng để: thẩm định và cập nhật Golden Dataset; kiểm chuẩn (calibrate) LLM-as-a-judge; và thẩm định chuyên sâu các ca có điểm số mấp mé ngưỡng phạt hoặc các ca khách hàng khiếu nại gay gắt.[m
+ [m
+ ---[m
+ [m
+[36m@@ -146,31 +162,32 @@[m [mvà quyết định thiết kế, không chép lại toàn bộ QA.[m
+ [m
+ | Hạng mục | Kết quả |[m
+ |---|---|[m
+[31m-| Tổng số records | ____ / 20 |[m
+[31m-| Easy | ____ / 5 |[m
+[31m-| Medium | ____ / 7 |[m
+[31m-| Hard | ____ / 5 |[m
+[31m-| Adversarial | ____ / 3 |[m
+[31m-| Source documents được sử dụng | ____ / 10 |[m
+[31m-| Validator status | PASS / FAIL |[m
+[32m+[m[32m| Tổng số records | 20 / 20 |[m
+[32m+[m[32m| Easy | 5 / 5 |[m
+[32m+[m[32m| Medium | 7 / 7 |[m
+[32m+[m[32m| Hard | 5 / 5 |[m
+[32m+[m[32m| Adversarial | 3 / 3 |[m
+[32m+[m[32m| Source documents được sử dụng | 10 / 10 |[m
+[32m+[m[32m| Validator status | PASS |[m
+ [m
+ **Ba case đại diện cho quyết định thiết kế**[m
+ [m
+ | ID | Difficulty | Source document(s) | Vì sao case phù hợp với difficulty/attack type? |[m
+ |---|---|---|---|[m
+[31m-| | | | |[m
+[31m-| | | | |[m
+[31m-| | | | |[m
+[32m+[m[32m| E01 | Easy | `01_product_catalog.md` | Câu hỏi tra cứu dữ kiện trực tiếp (single-hop lookup) về cấu hình phần cứng NovaBook 14 (14-inch, 16GB RAM, 512GB SSD) và công suất sạc USB-C PD 65W. Toàn bộ câu trả lời n�

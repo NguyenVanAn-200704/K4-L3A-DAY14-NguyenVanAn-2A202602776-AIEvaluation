@@ -246,24 +246,51 @@ class OpenAIGenerator:
     def __init__(self, max_output_tokens: int = 300) -> None:
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         self.model = os.getenv("OPENAI_MODEL", "").strip()
+        base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY is missing from .env")
         if not self.model:
             raise RuntimeError("OPENAI_MODEL is missing from .env")
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
         self.max_output_tokens = max_output_tokens
 
     def generate(self, prompt: str) -> str:
-        response = self.client.responses.create(
-            model=self.model,
-            input=prompt,
-            temperature=0,
-            max_output_tokens=self.max_output_tokens,
-        )
-        answer = response.output_text.strip()
-        if not answer:
-            raise RuntimeError("OpenAI returned an empty answer")
-        return answer
+        last_err: Exception | None = None
+        candidate_models = [self.model]
+        if "gemini-3.1-flash-lite" not in candidate_models:
+            candidate_models.append("gemini-3.1-flash-lite")
+
+        for attempt in range(6):
+            for model_name in candidate_models:
+                try:
+                    try:
+                        response = self.client.responses.create(
+                            model=model_name,
+                            input=prompt,
+                            temperature=0,
+                            max_output_tokens=self.max_output_tokens,
+                        )
+                        answer = response.output_text.strip()
+                        if answer:
+                            return answer
+                    except Exception:
+                        pass
+
+                    # Fallback to chat completions (for Gemini / standard OpenAI-compatible endpoints)
+                    response = self.client.chat.completions.create(
+                        model=model_name,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0,
+                        max_tokens=self.max_output_tokens,
+                    )
+                    answer = response.choices[0].message.content or ""
+                    answer = answer.strip()
+                    if answer:
+                        return answer
+                except Exception as e:
+                    last_err = e
+            time.sleep(3 * (attempt + 1))
+        raise RuntimeError(f"Generator failed after retries: {last_err}")
 
 
 @dataclass(frozen=True)
@@ -451,6 +478,7 @@ def generate_actual_answers(
             f"[{bar_after}] {index:02d}/{total:02d} | {item['id']} OK "
             f"({elapsed:.1f}s, {len(response.retrieved_chunks)} chunks)"
         )
+        time.sleep(1.5)
 
     return {
         "schema_version": "1.0",
